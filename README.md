@@ -43,6 +43,8 @@
 
 ### 构建与回归检查
 
+计划通过自建服务获取 RustDesk 控制端 ID/名称时，参见 [审计 API 部署准备](deploy/rustdesk-api/README.md)。该目录仅提供后续 Linux 部署配置，**尚未部署，也未接入伴侣**；审计日志不是实时会话快照，不能直接替代当前 IPC 检测。
+
 ```bash
 git clone https://github.com/imink/UUyc-companion.git
 cd UUyc-companion

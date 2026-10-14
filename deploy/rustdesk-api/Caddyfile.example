@@ -1,0 +1,11 @@
+# For a host-installed Caddy, not a container (127.0.0.1 is the host).
+# Replace the domain and add only trusted client/admin source IPs or VPN CIDRs.
+api.example.invalid {
+    @trusted remote_ip 127.0.0.1/32 ::1/128
+    handle @trusted {
+        reverse_proxy 127.0.0.1:21114
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+}

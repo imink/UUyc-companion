@@ -4,3 +4,5 @@
 .DS_Store
 build/
 dist/
+deploy/rustdesk-api/.env
+deploy/rustdesk-api/id_ed25519.pub

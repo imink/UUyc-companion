@@ -1,0 +1,47 @@
+name: uu-companion-rustdesk
+
+services:
+  hbbs:
+    image: rustdesk/rustdesk-server:1.1.16
+    command: ["hbbs", "-r", "${RUSTDESK_HOST:?Set RUSTDESK_HOST}:21117", "-k", "_"]
+    depends_on:
+      - hbbr
+    ports:
+      - "${RUSTDESK_BIND_IP:-127.0.0.1}:21115:21115/tcp"
+      - "${RUSTDESK_BIND_IP:-127.0.0.1}:21116:21116/tcp"
+      - "${RUSTDESK_BIND_IP:-127.0.0.1}:21116:21116/udp"
+    volumes:
+      - server-data:/root
+    restart: unless-stopped
+
+  hbbr:
+    image: rustdesk/rustdesk-server:1.1.16
+    command: ["hbbr", "-k", "_"]
+    ports:
+      - "${RUSTDESK_BIND_IP:-127.0.0.1}:21117:21117/tcp"
+    volumes:
+      - server-data:/root
+    restart: unless-stopped
+
+  api:
+    image: lejianwen/rustdesk-api:v2.7
+    environment:
+      TZ: Asia/Shanghai
+      RUSTDESK_API_LANG: zh-CN
+      RUSTDESK_API_GORM_TYPE: sqlite
+      RUSTDESK_API_APP_REGISTER: "false"
+      RUSTDESK_API_APP_WEB_CLIENT: "0"
+      RUSTDESK_API_APP_SHOW_SWAGGER: "0"
+      RUSTDESK_API_RUSTDESK_ID_SERVER: "${RUSTDESK_HOST:?Set RUSTDESK_HOST}:21116"
+      RUSTDESK_API_RUSTDESK_RELAY_SERVER: "${RUSTDESK_HOST:?Set RUSTDESK_HOST}:21117"
+      RUSTDESK_API_RUSTDESK_API_SERVER: "${RUSTDESK_API_URL:?Set an HTTPS API URL}"
+      RUSTDESK_API_RUSTDESK_KEY: "${RUSTDESK_PUBLIC_KEY:?Set the hbbs public key}"
+    ports:
+      - "127.0.0.1:21114:21114/tcp"
+    volumes:
+      - api-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  server-data:
+  api-data:
