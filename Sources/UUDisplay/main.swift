@@ -55,7 +55,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 心跳：看门狗据此判断主程序是否卡死（主线程定时器，卡住即停跳）
         Heartbeat.beat(Heartbeat.appURL)
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in Heartbeat.beat(Heartbeat.appURL) }
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                Heartbeat.beat(Heartbeat.appURL)
+                guard let self else { return }
+                Heartbeat.beatSession(active: self.coordinator.connected && self.coordinator.physicalDisableAllowed)
+            }
+        }
         installHotkey()
 
         let args = CommandLine.arguments

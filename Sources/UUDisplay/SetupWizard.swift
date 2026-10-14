@@ -10,6 +10,13 @@ final class WizardModel: ObservableObject {
     @Published var trusted = UUReader.isTrusted
     @Published var collapsedComputers = false
     @Published var collapsedMobiles = false
+    @Published var rustDeskEnabled = false {
+        didSet { if !loading { scheduleSave() } }
+    }
+    @Published var rustDeskError: String?
+    @Published var rustDeskProfile = DeviceConfig(name: "RustDesk", kind: .tablet, width: 0, height: 0) {
+        didSet { if !loading { scheduleSave() } }
+    }
 
     /// 自动保存后回调（设置窗口借此重新应用配置、显示「已自动保存」）
     var onSaved: (() -> Void)?
@@ -39,6 +46,8 @@ final class WizardModel: ObservableObject {
         defer { loading = false }
         trusted = UUReader.isTrusted
         rows = store.config.devices
+        rustDeskEnabled = store.config.rustDeskProfile != nil
+        if let profile = store.config.rustDeskProfile { rustDeskProfile = profile }
         guard trusted else {
             message = "需要先完成授权，才能读到 UU远程 里的设备。授权后点「导入设备列表」。"
             return
@@ -71,9 +80,20 @@ final class WizardModel: ObservableObject {
 
     func save() {
         saveWork?.cancel()
+        rustDeskError = nil
+        if !rustDeskEnabled {
+            store.config.rustDeskProfile = nil
+        } else if rustDeskProfile.hasSize || (rustDeskProfile.width == 0 && rustDeskProfile.height == 0) {
+            store.config.rustDeskProfile = rustDeskProfile
+        } else {
+            rustDeskError = "RustDesk 尺寸尚未保存：宽高必须都在 320～16384 像素之间，或同时留空。"
+        }
         // 宽高要么都没填，要么都在合理范围内（避免填到一半就保存）
-        guard rows.allSatisfy({ $0.kind == .computer || $0.hasSize || ($0.width == 0 && $0.height == 0) }) else { return }
-        store.config.devices = rows
+        if rows.allSatisfy({ $0.kind == .computer || $0.hasSize || ($0.width == 0 && $0.height == 0) }) {
+            store.config.devices = rows
+        } else {
+            message = "UU 设备尺寸尚未保存：宽高必须都在 320～16384 像素之间，或同时留空。"
+        }
         onSaved?()
     }
 }
@@ -160,7 +180,7 @@ struct DeviceRow: View {
             .pickerStyle(.segmented).labelsHidden().frame(width: 190)
 
             if cfg.kind == .computer {
-                Text("不指定虚拟屏分辨率，由UU远程决定").foregroundStyle(.secondary)
+                Text("不指定虚拟屏分辨率，由远程软件决定").foregroundStyle(.secondary)
             } else {
                 TextField("宽", value: sizeBinding(\.width), format: .number.grouping(.never))
                     .frame(width: 62).multilineTextAlignment(.trailing)
@@ -225,6 +245,18 @@ struct WizardView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    Toggle("自动匹配 RustDesk 已授权的桌面连接", isOn: $model.rustDeskEnabled)
+                    Text("为 RustDesk 预先填写尺寸。所有入站桌面连接共用此档；不能自动读取 iPhone 视口或识别控制端。文件传输、等待授权等不会触发。")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if model.rustDeskEnabled {
+                        DeviceRow(cfg: $model.rustDeskProfile)
+                        if let error = model.rustDeskError {
+                            Text(error).font(.caption).foregroundStyle(.orange)
+                        }
+                        Text("需要支持 VideoConnCount 的官方 RustDesk（源码核对：1.4.3 和当前版本）。连接后在 RustDesk 中选择虚拟屏；IPC 不可用时菜单栏会显示原因。")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Divider()
                     let computers = model.computers
                     if !computers.isEmpty {
                         DeviceGroupHeader(title: "电脑", count: computers.count, collapsed: $model.collapsedComputers)

@@ -19,6 +19,42 @@
 
 ---
 
+## RustDesk 支持版（本 fork）
+
+本 fork 保留 UU 自动检测、按设备尺寸、HiDPI、恢复布局、物理屏开关、快捷键、守护助手、开机启动、授权与导览功能，并新增 **RustDesk 已授权入站桌面会话的自动检测**。源码在 [imink/UUyc-companion](https://github.com/imink/UUyc-companion/tree/yuewang1-microsoft-rustdesk-companion-support)。下方原版下载链接和截图仍来自上游；本 fork 暂无预编译发行包，请按本节构建。
+
+### RustDesk 配置
+
+1. 在被控 Mac 安装官方 RustDesk，先确认远程桌面连接本身可正常工作。
+2. 打开伴侣的「设置 › 控制端设置」，开启「**自动匹配 RustDesk 已授权的桌面连接**」。
+3. 在 RustDesk 配置行填写预设设备的横屏物理像素宽、高，并选择 HiDPI。改动自动保存；尺寸未填或选择「不指定分辨率」时不调整显示器。
+4. 用控制端连接此 Mac，完成授权后自动创建虚拟屏；在 RustDesk 的显示器选择中选中「UUyc companion · RustDesk」。最后一个已授权桌面会话结束后自动恢复。
+
+**检测依据与边界：**
+
+- 只发送本机 Unix socket 的只读 `VideoConnCount` 查询，不读密码、修改 RustDesk 配置、绕过权限或连接外部服务器。该查询统计 `AUTHED_CONNS` 中的 `Remote` 类型，等待授权、拒绝连接、文件传输、摄像头、终端和端口转发不会触发。CM 窗口隐藏或切换标签不影响检测。
+- 已核对官方 **1.3.9、1.4.3 与当前源码**的计数逻辑；不是 RustDesk 的稳定公开 API，未来版本可能改变。支持当前用户的 `/tmp/RustDesk-<uid>/ipc`，以及旧版 `/tmp/RustDesk/ipc`；只接受属于当前用户的 socket，不访问 root 的 `_service` 接口。定制客户端、其它用户、不同 socket 路径或更早版本不保证兼容。
+- **只有桌面会话数量，没有控制端名称、ID 或视口尺寸。所有 RustDesk 入站桌面连接共用这一份尺寸档，包括电脑连接。不能识别 iPhone/iPad、自动读取分辨率、按 RustDesk peer 分配不同尺寸或自动处理旋转。** 请预先填写实际需要的尺寸。
+- UU 继续使用原来的设备识别和尺寸列表。两种远程同时活动时，共享一块虚拟屏，优先保留当前配置来源；该来源断开后切到另一个有效配置，仅在两边都不再需要时移除。不能同时给不同客户端提供独立尺寸。
+- RustDesk 功能默认关闭。开启后，socket 不可用、权限拒绝、查询超时或协议不兼容会显示在菜单栏并记入原日志。**未知状态不会冒充断开**：已创建的虚拟屏保留，停止关闭物理屏；确认服务 socket 消失或拒绝连接持续 2 秒后结束此来源。可关闭 RustDesk 开关或使用原有恢复/退出操作收尾。
+- 守护助手读取主线程维护的、有 PID 与时效校验的合并会话心跳，避免仅因 UU 断开而恢复仍被 RustDesk 使用的显示配置；主程序退出、卡住或会话心跳失效时仍按原来的安全路径恢复物理屏。
+
+上游私有 AboutKit 无法被 fork 用户下载，已用本地 AppKit/SwiftUI 关于页替换，保留原作者/许可证/开源致谢、关于页 PNG 渲染、Debug 编号开关及 `ui-labels.txt` 对照表。Debug 编号读取公开的应用内辅助功能树，不需要该私有包。
+
+### 构建与回归检查
+
+```bash
+git clone https://github.com/imink/UUyc-companion.git
+cd UUyc-companion
+git switch yuewang1-microsoft-rustdesk-companion-support
+scripts/test-connection.sh
+SIGN_IDENTITY=- scripts/build-app.sh
+```
+
+生成 `build/UUyc companion.app`，不会安装或打开。不要加 `--install`，除非你明确要安装并运行。内部 Bundle ID、配置路径和看门狗标识保留上游值，因此**不应与上游 App 同时运行**。测试使用替代读数、临时 Unix socket 和显示管理器替身，不创建虚拟屏、不关闭物理屏、不启动 RustDesk GUI。
+
+源码依据：[RustDesk 1.4.3 IPC](https://github.com/rustdesk/rustdesk/blob/1.4.3/src/ipc.rs)、[授权会话生命周期](https://github.com/rustdesk/rustdesk/blob/1.4.3/src/server/connection.rs)、[帧格式](https://github.com/rustdesk/hbb_common/blob/master/src/bytes_codec.rs)。目前验证覆盖协议/状态/协调逻辑和 macOS 构建；**尚未进行真实 RustDesk 远控、显示器拓扑、授权界面或 GUI 视觉验证**。
+
 ## 为什么需要它
 
 用 iPad 或手机远程操控 Mac 时，Mac 屏幕的比例和平板、手机不一样，远程画面上下或左右总有黑边，字也很小。每次连接都要手动调分辨率，断开后再调回来，很麻烦。
@@ -63,8 +99,8 @@ UU远程 的 Mac 被控端没有 Windows 版那样的「超级屏」（虚拟屏
 ## 系统要求
 
 - **macOS 14 Sonoma 或更新版本**（作者在 macOS 27 · Apple Silicon 上测试）
-- 被操控的 Mac 上已安装 **[UU远程](https://uuyc.163.com/)**
-- 平板或手机上装有 UU远程，并能正常连接这台 Mac
+- 被操控的 Mac 上已安装 **[UU远程](https://uuyc.163.com/)** 或本 fork 支持的 **[RustDesk](https://rustdesk.com/)**
+- 控制端安装相应远程软件，并能正常连接这台 Mac
 
 > 需要「被操控」的每一台 Mac 上都安装本软件；平板和手机上不需要装任何东西。
 
@@ -234,7 +270,7 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 需要 macOS 14 以上和 Xcode 命令行工具（Swift 6）：
 
 ```bash
-git clone https://github.com/aoyamashou/UUyc-companion.git
+git clone --branch yuewang1-microsoft-rustdesk-companion-support https://github.com/imink/UUyc-companion.git
 ```
 
 ```bash
@@ -245,7 +281,7 @@ cd UUyc-companion && SIGN_IDENTITY=- scripts/build-app.sh
 
 - `SIGN_IDENTITY=-` 表示用 ad-hoc 签名。缺点是每次重新构建后，系统授权都会失效，需要重新授权。如果你有自己的代码签名证书，把 `-` 换成证书名称，升级后授权就能保留
 - 只装了命令行工具（没有完整 Xcode）也能构建：内置的 PermissionFlow 和 TourKit 已经把需要 Xcode 宏插件的写法改掉了，详见各自目录下的 `VENDORED.md`
-- 「关于」窗口依赖作者的私有模块 AboutKit，目前只有作者本人能从源码完整构建；直接下载 Releases 里的安装包即可正常使用
+- 本 fork 的「关于」窗口和 Debug 编号均使用本地实现，不再依赖上游私有 AboutKit，构建只使用已内置的本地包
 
 <details>
 <summary><b>工作原理</b></summary>

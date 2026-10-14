@@ -47,6 +47,8 @@ struct DeviceConfig: Codable, Identifiable, Hashable {
 
 struct AppConfig: Codable {
     var devices: [DeviceConfig] = []
+    /// RustDesk IPC reports authorized desktop count, not peer identity or viewport.
+    var rustDeskProfile: DeviceConfig?
     var paused = false
     /// 远程时关闭物理屏（缺省关闭，在设置里开启；可选类型以兼容旧配置文件）
     var disablePhysical: Bool?
@@ -63,16 +65,17 @@ final class ConfigStore {
 
     static let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("UUDisplay", isDirectory: true)
-    private let url = ConfigStore.dir.appendingPathComponent("config.json")
+    private let url: URL
 
     var config: AppConfig {
         didSet { save() }
     }
 
-    var isConfigured: Bool { !config.devices.isEmpty }
+    var isConfigured: Bool { !config.devices.isEmpty || config.rustDeskProfile != nil }
 
-    private init() {
-        try? FileManager.default.createDirectory(at: ConfigStore.dir, withIntermediateDirectories: true)
+    init(directory: URL = ConfigStore.dir) {
+        url = directory.appendingPathComponent("config.json")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         config = (try? JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: url))) ?? AppConfig()
     }
 

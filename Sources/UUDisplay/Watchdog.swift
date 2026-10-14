@@ -7,6 +7,25 @@ import ServiceManagement
 enum Heartbeat {
     static let appURL = ConfigStore.dir.appendingPathComponent("heartbeat-app")
     static let watchdogURL = ConfigStore.dir.appendingPathComponent("heartbeat-watchdog")
+    static let sessionURL = ConfigStore.dir.appendingPathComponent("heartbeat-session")
+
+    static func beatSession(active: Bool, to url: URL = sessionURL) {
+        do {
+            let data = try JSONEncoder().encode(Session(pid: getpid(), active: active))
+            try data.write(to: url, options: .atomic)
+        } catch { Log.info("无法写入远程会话心跳：\(error.localizedDescription)") }
+    }
+
+    private struct Session: Codable { let pid: pid_t; let active: Bool }
+
+    static func sessionActive(pid: pid_t, at url: URL = sessionURL, now: Date = Date()) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let session = try? JSONDecoder().decode(Session.self, from: data),
+              session.pid == pid,
+              let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+              now.timeIntervalSince(modified) >= 0, now.timeIntervalSince(modified) < 3 else { return false }
+        return session.active
+    }
 
     static func beat(_ url: URL) {
         try? "\(getpid())".write(to: url, atomically: true, encoding: .utf8)
@@ -52,6 +71,7 @@ enum Watchdog {
                 let appHealthy = appExists && (hb?.age ?? .infinity) < appMaxAge
                 // 测试开关：假定 UU 一直连着，用于单独验证心跳超时
                 let uu = assumeUU || UUMonitor.overlayPresent()
+                    || (hb.map { Heartbeat.sessionActive(pid: $0.pid) } ?? false)
                 uuGoneSince = uu ? nil : (uuGoneSince ?? Date())
 
                 if !appHealthy {
@@ -61,7 +81,7 @@ enum Watchdog {
                     }
                     PhysicalDisplays.restore(reason: "看门狗：主程序\(appExists ? "卡死" : "不在")")
                 } else if let t = uuGoneSince, Date().timeIntervalSince(t) > uuGoneLimit {
-                    PhysicalDisplays.restore(reason: "看门狗：UU 已断开但物理屏未恢复")
+                    PhysicalDisplays.restore(reason: "看门狗：远程会话已结束但物理屏未恢复")
                 }
             }
             Thread.sleep(forTimeInterval: interval)

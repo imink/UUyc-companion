@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="1.1.3"
+VERSION="1.2.0"
 APP_NAME="UUyc companion"
 APP="build/$APP_NAME.app"
 LEGACY_APP="/Applications/UUDisplay.app"   # 改名前的安装位置
@@ -30,8 +30,6 @@ cp "$BIN" "$APP/Contents/MacOS/UUDisplay"
 cp "$BIN" "$APP/Contents/MacOS/UUDisplayWatchdog"
 # PermissionFlow 资源包（本地化文案等），放 Contents/Resources 供 PermissionFlowResources 查找
 cp -R "$(dirname "$BIN")/PermissionFlow_PermissionFlow.bundle" "$APP/Contents/Resources/"
-# AboutKit 资源包（作者头像），放 Contents/Resources
-cp -R "$(dirname "$BIN")/AboutKit_AboutKit.bundle" "$APP/Contents/Resources/"
 # 功能导览配图（TourKit 从 Bundle.main 的 Resources 根目录按文件名查找）
 cp Assets/Tour/*.png "$APP/Contents/Resources/"
 # App 图标与菜单栏模板图（见 Assets/AppIcon/README.md）

@@ -3,9 +3,18 @@
 import AppKit
 
 final class Coordinator {
-    let monitor = UUMonitor()
-    let display = DisplayManager()
-    private let store = ConfigStore.shared
+    let monitor: UUMonitor
+    let rustDesk: RustDeskMonitor
+    let display: DisplayManager
+    private let store: ConfigStore
+
+    init(store: ConfigStore = .shared, monitor: UUMonitor = UUMonitor(),
+         rustDesk: RustDeskMonitor? = nil, display: DisplayManager = DisplayManager()) {
+        self.store = store
+        self.monitor = monitor
+        self.rustDesk = rustDesk ?? RustDeskMonitor(enabled: { store.config.rustDeskProfile != nil })
+        self.display = display
+    }
 
     /// 状态变化时通知菜单栏刷新
     var onChange: (() -> Void)?
@@ -14,34 +23,46 @@ final class Coordinator {
     private var namePoll: Timer?
     private var connectedAt = Date.distantPast
     private var openedUUWindow = false
+    private var uuConfig: DeviceConfig?
+    private var selected: DisplaySelection.Selection?
 
     /// 调试：模拟连入的控制端名称（不读 UU）
     var simulatedName: String?
 
-    var connected: Bool { monitor.connected || simulatedName != nil }
+    var connected: Bool { monitor.connected || simulatedName != nil || rustDesk.connected }
 
     func start() {
         display.shouldDisablePhysical = { [weak self] in self?.physicalDisableAllowed ?? false }
         display.recoverIfNeeded()
         monitor.onConnect = { [weak self] in self?.handleConnect() }
         monitor.onDisconnect = { [weak self] in self?.handleDisconnect() }
+        rustDesk.onChange = { [weak self] in
+            guard let self else { return }
+            if self.rustDesk.connected && !self.rustDesk.healthy {
+                self.display.restorePhysicalNow(override: false)
+            }
+            self.reconcile()
+        }
         monitor.start()
+        rustDesk.start()
     }
 
     /// 开关打开且私有 API 可用时关闭物理屏；看门狗是可选兜底（快捷键 ⌃⌥⌘9 始终可用）
     var physicalDisableAllowed: Bool {
         store.config.shouldDisablePhysical && PhysicalDisplays.available
+            && (!rustDesk.connected || rustDesk.healthy)
     }
 
     var statusText: String {
         if display.wedged { return "⛔️ 屏幕设置无响应，请重启 Mac" }
         if store.config.paused { return "虚拟屏已暂停：连接时不做调整" }
-        guard connected else { return "等待其它设备连接中" }
-        let who = controllerName ?? "未知设备"
+        let warning = rustDesk.errorText.map { " · \($0)" } ?? ""
+        guard connected else { return "等待其它设备连接中\(warning)" }
+        let who = selected?.config.name ?? controllerName ?? (rustDesk.connected ? "RustDesk" : "未知设备")
         if let c = display.current, display.isActive {
-            return "\(who) 已连接 · 虚拟屏已匹配 \(c.sizeLabel)\(display.physicalOff ? " · 物理屏幕已软关闭" : "")"
+            return "\(who) 已连接 · 虚拟屏已匹配 \(c.sizeLabel)\(display.physicalOff ? " · 物理屏幕已软关闭" : "")\(warning)"
         }
-        return "\(who) 已连接 · 虚拟屏没有调整"
+        return "\(who) 已连接 · 虚拟屏没有调整\(warning)"
     }
 
     // MARK: - 事件
@@ -63,14 +84,14 @@ final class Coordinator {
     func handleDisconnect() {
         namePoll?.invalidate()
         namePoll = nil
-        display.remove()
+        uuConfig = nil
         controllerName = nil
-        onChange?()
+        reconcile()
     }
 
     /// 返回 true 表示已拿到名称、无需继续轮询
     private func pollName() -> Bool {
-        guard connected, !store.config.paused else { return true }
+        guard monitor.connected || simulatedName != nil, !store.config.paused else { return true }
         let elapsed = Date().timeIntervalSince(connectedAt)
 
         if let name = simulatedName ?? readControllerName() {
@@ -113,17 +134,25 @@ final class Coordinator {
             cfg = nil
             Log.info("「\(name)」不在设备列表里，不调整")
         }
-        apply(cfg)
+        uuConfig = cfg
+        reconcile()
     }
 
-    private func apply(_ cfg: DeviceConfig?) {
+    private func reconcile() {
         defer { onChange?() }
+        guard !store.config.paused else { return }
+        selected = DisplaySelection.choose(uu: uuConfig,
+                                           rustDesk: rustDesk.connected ? store.config.rustDeskProfile : nil,
+                                           current: selected?.owner)
+        let cfg = selected?.config
         guard let cfg, cfg.kind != .computer, cfg.hasSize else {
-            if display.isActive { display.remove() }
-            Log.info(cfg == nil ? "无可用配置，不切换" : "「\(cfg!.name)」不指定分辨率或还没填写，不切换")
+            display.remove()
             return
         }
-        if display.matches(cfg) { return }
+        if display.matches(cfg) {
+            display.disablePhysicalIfNeeded()
+            return
+        }
         display.create(cfg)
     }
 
@@ -133,17 +162,22 @@ final class Coordinator {
         store.config.paused = paused
         if paused {
             namePoll?.invalidate()
+            selected = nil
             display.remove()
-        } else if connected {
+        } else if monitor.connected || simulatedName != nil {
             handleConnect()
         }
+        reconcile()
         onChange?()
     }
 
     /// 配置变更后，若正在被控则按新配置重新应用
     func configChanged() {
+        rustDesk.refresh()
         if connected, !store.config.paused {
-            if let name = controllerName { resolve(name) } else { handleConnect() }
+            if let name = controllerName { resolve(name) }
+            else if monitor.connected || simulatedName != nil { handleConnect() }
+            reconcile()
         }
         onChange?()
     }
